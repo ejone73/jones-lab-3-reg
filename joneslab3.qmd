@@ -1,0 +1,18 @@
+---
+title: "Linear Regression: Model Specification, Comparison, and Interpretation"
+subtitle: "A worked example using occupational prestige"
+author: "Ember Jones"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
