@@ -1,6 +1,6 @@
 ---
 title: "Linear Regression: Model Specification, Comparison, and Interpretation"
-subtitle: "A worked example using occupational prestige"
+subtitle: "A worked example using employee workplace ratings"
 author: "Ember Jones"
 format:
   html:
@@ -11,8 +11,467 @@ format:
     embed-resources: true
     theme: cosmo
 execute:
-  echo: true
+  echo: false
   warning: false
   message: false
 ---
 
+```{r, setup}
+
+# library
+library(ggthemes)
+library(carData)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(performance)
+library(gt)
+
+# Load data
+attitude <- attitude
+dat <- attitude |>
+  select(rating, complaints, learning, raises)
+n <- nrow(dat)
+```
+
+```{r, descriptive statistics}
+
+descriptives <- dat |>
+  summarise(
+    across(
+      c(complaints, learning, raises, rating),
+      list(mean = mean, SD = sd, min = min, max = max)
+    )
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = c("variable", ".value"),
+    names_sep = "_"
+  )
+
+descriptives.gt <- descriptives |>
+  gt() |>
+  fmt_number(columns = where(is.numeric), decimals = 2) |>
+  tab_header(title = "Descriptive statistics for continuous variables")
+```
+
+```{r, distribution of rating}
+
+ratingdist.gg <- ggplot(dat, aes(x = rating)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 15,
+    fill = "darkgoldenrod",
+    color = "white",
+    alpha = 0.8
+  ) +
+  geom_density(
+    linewidth = 0.9,
+    color = "blue3"
+  ) +
+  labs(
+    x = "Occupation rating score",
+    y = "Density",
+    title = "Distribution of occupational rating scores"
+  ) +
+  theme_clean()
+```
+
+```{r, complaints scatterplot}
+
+comprating.gg <- ggplot(dat, aes(x = complaints, y = rating)) +
+  geom_point(
+    color = "blue4",
+    alpha = 0.75) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "deeppink4"
+  ) + 
+  labs(
+    x = "Average score for handling of employee complaints",
+    y = "Overall rating score",
+    title = "Relationship between the handling of complaints and overall rating"
+  ) +
+  theme_clean()
+```
+
+```{r, learning scatterplot}
+
+learnrating.gg <- ggplot(dat, aes(x = learning, y = rating)) +
+  geom_point(color = "blue4", 
+             alpha = 0.75) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "darkolivegreen"
+  ) + 
+  labs(
+    x = "Average score for opportunity to learn",
+    y = "Overall rating score",
+    title = "Relationship between the opportunity to learn and overall rating"
+  ) +
+  theme_clean()
+```
+
+```{r, raises scatterplot}
+
+raiserating.gg <- ggplot(dat, aes(x = raises, y = rating)) +
+  geom_point(color = "blue4",
+             alpha = 0.75) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "darkcyan"
+  ) + 
+  labs(
+    x = "Average score for pay raises",
+    y = "Overall rating score",
+    title = "Relationship between pay raises and overall rating"
+  ) +
+  theme_clean()
+```
+
+```{r, fitting models}
+
+# intercept-only model
+mod0 <- lm(rating ~ 1, data = dat)
+
+# complaints model
+mod1 <- lm(rating ~ complaints, data = dat)
+
+# complaints + learning model
+mod2 <- lm(rating ~ complaints + learning, data = dat)
+
+# complaints + learning + raises model
+mod3 <- lm(rating ~ complaints + learning + raises, data = dat)
+```
+
+```{r, nested model f tests}
+
+tests <- anova(mod0, mod1, mod2, mod3)
+
+tests <- tests |>
+  select(Res.Df, Df, F, `Pr(>F)`) |>
+  rename(
+    Residual.df = Res.Df,
+    Nested.df = Df,
+    Nested.F.stat = F,
+    Nested.p.value = `Pr(>F)`
+  )
+
+glance0 <- glance(mod0)
+glance1 <- glance(mod1)
+glance2 <- glance(mod2)
+glance3 <- glance(mod3)
+```
+
+```{r, nested model comparison table}
+
+mods <- c(
+  "M0: Null",
+  "M1: Complaints",
+  "M2: ... + Learning",
+  "M3: ... + Raises"
+)
+
+glances <- rbind(
+  glance0,
+  glance1,
+  glance2,
+  glance3
+)
+
+comparison_table <- cbind(
+  Model = mods,
+  glances,
+  tests
+)
+
+comparison_table <- comparison_table |>
+  mutate(
+    Delta.R2 = r.squared - lag(r.squared),
+    RMSE = c(
+      sqrt(mean(residuals(mod0)^2)),
+      sqrt(mean(residuals(mod1)^2)),
+      sqrt(mean(residuals(mod2)^2)),
+      sqrt(mean(residuals(mod3)^2))
+    )
+  ) |>
+  select(
+    Model,
+    r.squared,
+    Delta.R2,
+    adj.r.squared,
+    RMSE,
+    Residual.df,
+    Nested.df,
+    Nested.F.stat,
+    Nested.p.value
+  )
+
+comparison.gt <- comparison_table |>
+  gt() |>
+  cols_label(
+    Model = "Model",
+    r.squared = "R²",
+    Delta.R2 = "ΔR²",
+    adj.r.squared = "Adjusted R²",
+    RMSE = "RMSE",
+    Residual.df = "Residual df",
+    Nested.df = "Nested df",
+    Nested.F.stat = "Nested F",
+    Nested.p.value = "Nested p"
+  ) |>
+  fmt_number(
+    columns = c(
+      r.squared,
+      Delta.R2,
+      adj.r.squared,
+      RMSE,
+      Nested.F.stat
+    ),
+    decimals = 3
+  ) |>
+  fmt(
+    columns = Nested.p.value,
+    fns = function(x) {
+      ifelse(
+        is.na(x),
+        "—",
+        ifelse(x < .001, "< .001", sprintf("%.3f", x))
+      )
+    }
+  ) |>
+  sub_missing(
+    columns = c(Delta.R2, Nested.df, Nested.F.stat),
+    missing_text = "—"
+  ) |>
+  tab_header(title = "Model performance statistics")
+```
+
+```{r, further performance comparison}
+
+performance_comparison <- compare_performance(
+  mod0,
+  mod1,
+  mod2,
+  mod3,
+  rank = TRUE
+)
+```
+
+```{r, select model}
+
+selected_row <- comparison_table |>
+  slice_max(
+    order_by = adj.r.squared,
+    n = 1,
+    with_ties = FALSE
+  )
+
+selected_name <- selected_row$Model
+
+selected_model <- switch(
+  selected_name,
+  "M0: Null" = mod0,
+  "M1: Complaints" = mod1,
+  "M2: ... + Learning" = mod2,
+  "M3: ... + Raises" = mod3
+)
+```
+
+```{r, extract coefficients}
+
+coefficient_results <- tidy(
+  selected_model,
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+
+coeff.gt <- coefficient_results |>
+  select(
+    term,
+    estimate,
+    std.error,
+    conf.low,
+    conf.high,
+    p.value
+  ) |>
+  gt() |>
+  cols_label(
+    term = "Predictor",
+    estimate = "Estimate",
+    std.error = "SE",
+    conf.low = "95% CI lower",
+    conf.high = "95% CI upper",
+    p.value = "p"
+  ) |>
+  fmt_number(
+    columns = c(
+      estimate,
+      std.error,
+      conf.low,
+      conf.high
+    ),
+    decimals = 3
+  ) |>
+  fmt(
+    columns = p.value,
+    fns = function(x) {
+      ifelse(
+        x < .001,
+        "< .001",
+        sprintf("%.3f", x)
+      )
+    }
+  ) |>
+  tab_header(title = "Unstandardized regression coefficients for the selected model")
+```
+
+```{r, overall performance}
+
+overall.gt <-selected_row |>
+  select(
+    Model,
+    r.squared,
+    adj.r.squared,
+    RMSE
+  ) |>
+  gt() |>
+  cols_label(
+    Model = "Model",
+    r.squared = "R²",
+    adj.r.squared = "Adjusted R²",
+    RMSE = "RMSE"
+  ) |>
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 3
+  ) |>
+tab_header(title = "Overall performance of the selected model")
+```
+
+# Employee Workplace Ratings: A Linear Model
+
+#### Lab 3
+
+## Introduction
+
+#### 1.4
+
+**Table 1** shows descriptive statistics for average workplace rating and the rating for handling of complaints, learning opportunities, and pay raises. The maximum observed score for learning opportunities is low (75) compared to the handling of complaints (90) and pay raises (88), respectively.
+
+```{r}
+#| tbl-cap: "Table 1."
+descriptives.gt
+```
+
+**Figure 1** shows the approximately normal distribution and density curve of occupational rating scores with a slight left skew.
+
+```{r}
+#| fig-cap: "Figure 1."
+ratingdist.gg
+```
+
+**Figures 2-4** show the relationships between overall workplace rating and several continuous variables. The handling of complaints, availability of learning opportunities, and satisfaction with raises all appear relatively linear in their relationships with workplace rating, though there may be a slight downward curve in the relationship between rating and raises.
+
+```{r}
+#| fig-cap: "Figure 2."
+comprating.gg
+```
+
+```{r}
+#| fig-cap: "Figure 3."
+learnrating.gg
+```
+
+```{r}
+#| fig-cap: "Figure 4."
+raiserating.gg
+```
+
+These results are fairly consistent with expectations. Most overall rating scores are centrally clustered, and positive workplace rating is associated with positive scores for the handling of workplace complaints, the provision of learning opportunities, and the availability of pay raises.
+
+## Selecting models
+
+### Predictions
+
+#### 2.1
+
+The handling of employee complaints is likely to be associated with positive workplace ratings because when complaints are properly addressed, factors that may be lowering workplace rating may disappear or have a lesser impact on overall employee workplace rating. Accounting for the addressing of complaints, opportunities for learning could explain low workplace rating from employees who feel that they are not personally gaining knowledge or experience from their position as opposed to those with interpersonal or workplace issues. Finally, pay increases could account for variation in individuals who are particularly ambitious, financially motivated, or working with bosses who do not pay them enough. Additionally, those with low satisfaction in the handling of complaints and opportunities to learn may still provide an overall rating that is higher than expected when the pay is high enough. It is possible that this data could be skewed due to the sample being from actively employed individuals; those with extremely low workplace satisfaction are more likely to leave their workplace.
+
+### Exploring models
+
+#### 2.3
+
+Model 0's coefficient for the intercept represents the sample mean rating score of 64.63. Introducing continuous variables changes the meaning of the coefficients; model 1's coefficient for complaints, 0.75, indicates the rate at which overall rating points change with the rating of the handling of complaints. Model 2's coefficient for complaints is 0.64, which does not represent the rate of change in the overall variables, but instead the difference between the results of Model 1 and Model 2, as the second considers yet another variable. This pattern continues in Model 3, where the complaints coefficient also represents the change between Models 2 and 3.
+
+### Comparing models
+
+#### 3.5
+
+**Table 2** shows goodness-of-fit statistics for models 0, 1, 2, and 3.
+
+```{r}
+#| tbl-cap: "Table 2."
+comparison.gt
+```
+
+Models 2 and 3 explain the most variance within the dataset overall according to R²; the ΔR² value shows that adding the second predictor, Learning, increased the statistical significance of the model only marginally, and the third, Raises, did not cause any improvement whatsoever. Thus, the predictor Complaints explains much of the observed variation, and Complaints + Learning explains the most variation. The change in root mean squared error (RMSE) show that the most meaningful change in model quality happens with the first predictor being added, with little change with the second and none with the third.
+
+### Model diagnostics
+
+#### 4.2
+
+**Figure 5** shows the degree of this data's coherence to assumptions required for linear modeling.
+
+```{r, diagnostic plots}
+#| fig-cap: "Figure 5."
+#| fig-width: 9
+#| fig-height: 8
+performance::check_model(selected_model)
+```
+
+While there are some cases of divergence, such as in homogeneity of variance, in general the dataset is approximately linear and normal, with somewhat consistent variability of residuals and few influential observations. The only potential problem on a larger scale is the homogeneity of variance; this result shows that variance is somewhat clustered and not even throughout the dataset. However, as the other conditions are met and the statistics show that Model 2 is a good fit otherwise (**Table 2**), I do not believe that this will effect my findings in a significant way.
+
+## Reporting models
+
+### Model selection
+
+#### 5.1, 5.4
+
+I selected the model **`r selected_name`**.
+
+Its performance is:
+
+- R² = **`r round(selected_row$r.squared, 3)`**
+- Adjusted R² = **`r round(selected_row$adj.r.squared, 3)`**
+- RMSE = **`r round(selected_row$RMSE, 2)`** (rating)
+
+In context of the data, this result indicates that 68.6% of the variation present in overall employee workplace ratings can be explained by the distribution and variation in ratings of the handling of workplace complaints and of the provision of learning opportunities in conjunction. On average, the model's predicted rating values are around 6.48 rating points away from actual observed rating values; there are 6.48 rating points of error in this model. 
+
+This model is more appropriate than models 0, 1, and 3 because it has the highest *unique* R² value and the highest adjusted R² value. While the introduction of the variable learning was able to explain only a small amount of the variation, model 3 (with the introduction of the raises variable) explained no additional variation beyond complaints and learning. Thus, model 3 only introduces more risk of collinearity with unnecessary variables that explain little variation. While RMSE does increase very slightly in Model 2 compared to Model 3, the difference is so slight that it does not warrant taking the risk. Moreover, as shown in **Figure 5**, Model 2 fits the majority of the assumptions required for linear modeling. 
+
+### Model interpretation
+
+#### 5.3 & 6
+
+**Table 4** summarizes the performance of Model 2. 
+
+```{r}
+#| tbl-cap: "Table 4."
+overall.gt
+```
+
+**Table 3** shows the regression coefficients in the chosen model. 
+
+```{r}
+#| tbl-cap: "Table 3."
+coeff.gt
+```
+
+This data shows that when the rating for the handling of workplace complaints and the rating for learning opportunities are scored at 0 points, the predicted overall workplace rating is **`r round(coefficient_results$estimate[1], 2)`** (intercept). The increase in rating of complaints handling is positively associated with a **`r round(coefficient_results$estimate, 2)`**-rating point increase in overall workplace rating if the rating for learning is being held constant. The p-value for this finding is less than 0.001 and the confidence interval is entirely positive, meaning that we are reasonably certain that this is a significant relationship. Similarly, an increase in rating of learning opportunties is positivelt associated with an additional **`r round(coefficient_results$estimate[3], 2)`**-rating point increase in overall workplace rating. However, with a p-value at **`r round(coefficient_results$p.value[3], 3)`** and a confidence interval that includes a zero (which would indicate no relationship), we are not confident that this is a statistically significant association.
+
+Overall, these results indicate that the handling of complaints, provision of learning opportunities, and pay raises are all positively associated with overall employee workplace rating, but that complaint handling and learning opportunities can explain much of the variation in overall rating. However, we are more confident in the significance of the complaints variable than the learning opportunities variable. More data may be helpful in the future to further tease out the drivers behind workplace rating. 
